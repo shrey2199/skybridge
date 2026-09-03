@@ -1,0 +1,17 @@
+{
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "type": "wrangler types ./back-end-cf/types/worker.d.ts",
+    "test": "node --experimental-strip-types back-end-cf/services/jellyfinUtils.test.ts",
+    "format": "prettier . --write",
+    "build": "node minifyFrontend.js"
+  },
+  "devDependencies": {
+    "html-minifier-terser": "^7.2.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.128.0"
+  },
+  "type": "module"
+}

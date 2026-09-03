@@ -1,0 +1,70 @@
+{
+  "name": "skybridge",
+  "main": "back-end-cf/index.ts",
+  "compatibility_date": "2025-04-10",
+  "preview_urls": false,
+  "assets": {
+    "directory": "./front-end/",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/*",
+      "!/sb",
+      "!/sb/*"
+    ]
+  },
+  "kv_namespaces": [
+    {
+      "binding": "SB_CACHE",
+      // "preview_id": "", // for development
+      "id": "" // <~ https://dash.cloudflare.com/?to=/:account/workers/kv/namespaces
+    }
+  ],
+  "vars": {
+    // Modify these parameters for 21Vianet (China) if necessary
+    "OAUTH": {
+      "clientId": "",
+      "clientSecret": "",
+      "redirectUri": "http://localhost/onedrive-login",
+      "loginHost": "https://login.microsoftonline.com",
+      "oauthUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/",
+      "apiHost": "https://graph.microsoft.com",
+      "apiUrl": "https://graph.microsoft.com/v1.0/me/drive/root",
+      "scope": "offline_access User.Read Files.ReadWrite.All"
+    },
+    "PROTECTED": {
+      // Exposed root path (empty=full drive), e.g. '/media/music'
+      "EXPOSE_PATH": "",
+      // Require authentication for root access using GLOBAL_PASSWORD
+      "REQUIRE_AUTH": true,
+      // Global password for REQUIRE_AUTH (plain text, not hashed)
+      "GLOBAL_PASSWORD": "",
+      // Enable folder-level password protection (only folders with .password require auth)
+      "FOLDER_LOCK_ENABLE": true,
+      // If authentication is enabled, filename to store passwords (sha256 hex format)
+      "PASSWD_FILENAME": ".password",
+      // 1) Proxy file downloads via worker, e.g. example.com/{keyword}/file
+      // 2) Cache WebDAV GET responses if domain contains {keyword}.example
+      "PROXY_KEYWORD": ""
+    },
+    // Method-based cache TTL (seconds)
+    // During this period, the OneDrive API will not be called again
+    "CACHE_TTLMAP": {
+      "GET": 0,
+      "POST": 0
+    }
+  },
+  // "build": {
+  //   "command": "npm run build"
+  // },
+  // "routes": [
+  //   {
+  //     "pattern": "subdomain.example.com/*",
+  //     "zone_name": "example.com"
+  //   }
+  // ],
+  "triggers": {
+    "crons": [
+      "0 0 1 * *"
+    ]
+  }
+}

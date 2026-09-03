@@ -1,0 +1,5 @@
+wrangler.jsonc
+dev.jsonc
+worker.d.ts
+
+front-end/index.min.html
