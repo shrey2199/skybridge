@@ -1,5 +1,4 @@
 import type { DavRes } from '../types/apiType';
-import { runtimeEnv } from '../types/env';
 import { authenticateWebdav } from '../services/authUtils';
 import { davClient } from '../services/davMethods';
 import { parsePath } from '../services/pathUtils';
@@ -34,17 +33,17 @@ export async function handleWebdav(request: Request, env: Env, requestUrl: URL):
   ).path;
 
   const handlers: Record<string, () => Promise<DavRes> | DavRes> = {
-    HEAD: () => davClient.handleHead(filePath),
-    COPY: () => davClient.handleCopyMove(filePath, 'COPY', destination),
-    MOVE: () => davClient.handleCopyMove(filePath, 'MOVE', destination),
-    DELETE: () => davClient.handleDelete(filePath),
-    MKCOL: () => davClient.handleMkcol(filePath),
-    PUT: () => davClient.handlePut(filePath, request),
-    PROPFIND: () => davClient.handlePropfind(filePath, parseDepth(request.headers.get('Depth'))),
+    HEAD: () => davClient.handleHead(env, filePath),
+    COPY: () => davClient.handleCopyMove(env, filePath, 'COPY', destination),
+    MOVE: () => davClient.handleCopyMove(env, filePath, 'MOVE', destination),
+    DELETE: () => davClient.handleDelete(env, filePath),
+    MKCOL: () => davClient.handleMkcol(env, filePath),
+    PUT: () => davClient.handlePut(env, filePath, request),
+    PROPFIND: () => davClient.handlePropfind(env, filePath, parseDepth(request.headers.get('Depth'))),
   };
 
   const handler = handlers[request.method];
-  const davRes = handleDavRes(await handler(), isProxyRequest);
+  const davRes = handleDavRes(await handler(), env, isProxyRequest);
 
   return new Response(davRes.davXml, {
     status: davRes.davStatus,
@@ -52,7 +51,7 @@ export async function handleWebdav(request: Request, env: Env, requestUrl: URL):
   });
 }
 
-function handleDavRes(davRes: DavRes, isProxyRequest: boolean) {
+function handleDavRes(davRes: DavRes, env: Env, isProxyRequest: boolean) {
   const davHeaders = {
     ...(davRes.davXml ? { 'Content-Type': 'application/xml; charset=utf-8' } : {}),
     ...(davRes.davHeaders || {}),
@@ -60,7 +59,7 @@ function handleDavRes(davRes: DavRes, isProxyRequest: boolean) {
 
   const davXml =
     isProxyRequest && davRes.davXml
-      ? davRes.davXml.replaceAll('<d:href>', `<d:href>/${runtimeEnv.PROTECTED.PROXY_KEYWORD}`)
+      ? davRes.davXml.replaceAll('<d:href>', `<d:href>/${env.PROTECTED.PROXY_KEYWORD}`)
       : davRes.davXml;
 
   return { davXml, davStatus: davRes.davStatus, davHeaders };

@@ -1,5 +1,4 @@
 import { DriveItemCollection } from '../types/apiType';
-import { runtimeEnv } from '../types/env';
 
 export async function sha256(message: string): Promise<string> {
   const msgBuffer = new TextEncoder().encode(message);
@@ -8,15 +7,19 @@ export async function sha256(message: string): Promise<string> {
 }
 
 export async function getSaveDelta(
+  env: Env,
   path: string,
   dataToSave?: DriveItemCollection,
 ): Promise<DriveItemCollection | null> {
+  if (!env.SB_CACHE) {
+    throw new Error('KV is not available');
+  }
   path = path.toLocaleLowerCase();
-  const dString = await runtimeEnv.SB_CACHE.get(`delta_${path}`);
+  const dString = await env.SB_CACHE.get(`delta_${path}`);
   const dData = dString ? (JSON.parse(dString) as DriveItemCollection) : null;
 
   if (dataToSave) {
-    await runtimeEnv.SB_CACHE.put(`delta_${path}`, JSON.stringify(dataToSave));
+    await env.SB_CACHE.put(`delta_${path}`, JSON.stringify(dataToSave));
   }
 
   return dData;

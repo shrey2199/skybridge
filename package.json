@@ -3,6 +3,7 @@
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "type": "wrangler types ./back-end-cf/types/worker.d.ts",
+    "typecheck": "tsc --noEmit -p back-end-cf/tsconfig.json",
     "test": "node --experimental-strip-types back-end-cf/services/jellyfinUtils.test.ts",
     "format": "prettier . --write",
     "build": "node minifyFrontend.js"

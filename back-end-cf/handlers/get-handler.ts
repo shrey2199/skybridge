@@ -3,11 +3,13 @@ import { parsePath } from '../services/pathUtils';
 import { renderDeployHtml } from '../services/deployMethods';
 import { authorizeActions } from '../services/authUtils';
 import { handleJellyfinJobGet } from '../services/jellyfinMethods';
+import type { TokenScope } from '../types/apiType';
 
 export async function handleGetRequest(
   request: Request,
   env: Env,
   requestUrl: URL,
+  preAuth?: Set<TokenScope>,
 ): Promise<Response> {
   const jellyfinResponse = await handleJellyfinJobGet(env, requestUrl);
   if (jellyfinResponse) {
@@ -47,17 +49,21 @@ export async function handleGetRequest(
     return new Response('Access Denied', { status: 403 });
   } else if (
     !(
-      await authorizeActions(['download'], {
-        env,
-        url: requestUrl,
-        passwd: request.headers.get('Authorization') ?? '',
-      })
-    ).has('download')
+      preAuth?.has('download') ||
+      (
+        await authorizeActions(['download'], {
+          env,
+          url: requestUrl,
+          passwd: request.headers.get('Authorization') ?? '',
+        })
+      ).has('download')
+    )
   ) {
     return new Response('Access Denied', { status: 403 });
   }
 
   return downloadFile(
+    env,
     filePath,
     isProxyRequest,
     requestUrl.searchParams.get('format'),

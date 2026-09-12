@@ -12,7 +12,7 @@ const UPLOAD_MARKER_FILENAME = '.upload';
 async function readTextFileFromDrive(env: Env, filePath: string): Promise<string | null> {
   try {
     const uri = buildUriPath(filePath, env.PROTECTED.EXPOSE_PATH, env.OAUTH.apiUrl) + '/content';
-    const response = await fetchWithAuth(uri, { redirect: 'manual' });
+    const response = await fetchWithAuth(uri, { redirect: 'manual' }, env);
 
     if (response.status === 404) {
       return null;
@@ -157,7 +157,7 @@ async function uploadMarkerExists(env: Env, folderPath: string): Promise<boolean
   const markerPath = `${folderPath === '/' ? '' : folderPath}/${UPLOAD_MARKER_FILENAME}`;
   try {
     const uri = buildUriPath(markerPath, env.PROTECTED.EXPOSE_PATH, env.OAUTH.apiUrl) + '/content';
-    const response = await fetchWithAuth(uri, { redirect: 'manual' });
+    const response = await fetchWithAuth(uri, { redirect: 'manual' }, env);
     return response.status === 200 || response.status === 301 || response.status === 302;
   } catch (error) {
     console.error('Error checking upload marker:', error);

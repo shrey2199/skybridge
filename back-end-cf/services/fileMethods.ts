@@ -1,16 +1,16 @@
 import type { FetchFilesRes, UploadPayload, DriveItemCollection } from '../types/apiType';
-import { runtimeEnv } from '../types/env';
 import { fetchWithAuth, fetchBatchRes } from './fetchUtils';
 import { buildUriPath } from './pathUtils';
 
 export async function fetchFiles(
+  env: Env,
   path: string,
   skipToken?: string,
   orderby?: string,
 ): Promise<FetchFilesRes> {
   const parent = path || '/';
   const uri = [
-    buildUriPath(path, runtimeEnv.PROTECTED.EXPOSE_PATH, runtimeEnv.OAUTH.apiUrl),
+    buildUriPath(path, env.PROTECTED.EXPOSE_PATH, env.OAUTH.apiUrl),
     '/children?select=name,size,lastModifiedDateTime,@microsoft.graph.downloadUrl',
     // maximum 1000, may change https://github.com/OneDrive/onedrive-api-docs/issues/319
     '&top=1000',
@@ -18,7 +18,7 @@ export async function fetchFiles(
     skipToken ? `&skiptoken=${skipToken}` : '',
   ].join('');
 
-  const pageRes: DriveItemCollection = await (await fetchWithAuth(uri)).json();
+  const pageRes: DriveItemCollection = await (await fetchWithAuth(uri, {}, env)).json();
   if (pageRes.error) {
     throw new Error(JSON.stringify(pageRes.error));
   }
@@ -39,11 +39,11 @@ export async function fetchFiles(
         lastModifiedDateTime: file.lastModifiedDateTime,
         url: file['@microsoft.graph.downloadUrl'],
       }))
-      .filter((file) => file.name !== runtimeEnv.PROTECTED.PASSWD_FILENAME),
+      .filter((file) => file.name !== env.PROTECTED.PASSWD_FILENAME),
   };
 }
 
-export async function fetchUploadLinks(fileList: UploadPayload[]) {
+export async function fetchUploadLinks(env: Env, fileList: UploadPayload[]) {
   // Empty files cannot use createUploadSession, and a batch PUT would send a
   // literal "{}" body that corrupts them — create them directly instead.
   await Promise.all(
@@ -51,10 +51,10 @@ export async function fetchUploadLinks(fileList: UploadPayload[]) {
       .filter((file) => !file['fileSize'])
       .map(async (file) => {
         const uri =
-          runtimeEnv.OAUTH.apiUrl +
-          buildUriPath(file['remotePath'], runtimeEnv.PROTECTED.EXPOSE_PATH, '') +
+          env.OAUTH.apiUrl +
+          buildUriPath(file['remotePath'], env.PROTECTED.EXPOSE_PATH, '') +
           '/content';
-        const res = await fetchWithAuth(uri, { method: 'PUT', body: '' });
+        const res = await fetchWithAuth(uri, { method: 'PUT', body: '' }, env);
         if (!res.ok) {
           throw new Error(`Failed to create empty file ${file['remotePath']}: ${res.status}`);
         }
@@ -66,12 +66,12 @@ export async function fetchUploadLinks(fileList: UploadPayload[]) {
     requests: sessionFiles.map((file, index) => ({
       id: `${index + 1}`,
       method: 'POST',
-      url: `/me/drive/root${buildUriPath(file['remotePath'], runtimeEnv.PROTECTED.EXPOSE_PATH, '')}/createUploadSession`,
+      url: `/me/drive/root${buildUriPath(file['remotePath'], env.PROTECTED.EXPOSE_PATH, '')}/createUploadSession`,
       headers: { 'Content-Type': 'application/json' },
       body: {},
     })),
   };
-  const batchResult = await fetchBatchRes(batchRequest);
+  const batchResult = await fetchBatchRes(batchRequest, env);
   batchResult.responses.forEach((response) => {
     if (response.status === 200 || response.status === 201) {
       const file = sessionFiles[parseInt(response.id) - 1];
@@ -84,6 +84,7 @@ export async function fetchUploadLinks(fileList: UploadPayload[]) {
 }
 
 export async function downloadFile(
+  env: Env,
   filePath: string,
   stream?: boolean,
   format?: string | null,
@@ -95,15 +96,19 @@ export async function downloadFile(
   }
 
   const uri = [
-    buildUriPath(filePath, runtimeEnv.PROTECTED.EXPOSE_PATH, runtimeEnv.OAUTH.apiUrl) + '/content',
+    buildUriPath(filePath, env.PROTECTED.EXPOSE_PATH, env.OAUTH.apiUrl) + '/content',
     format ? `?format=${format}` : '',
     format === 'jpg' ? '&width=30000&height=30000' : '',
   ].join('');
 
-  const downloadResp = await fetchWithAuth(uri, {
-    headers: reqHeaders,
-    redirect: 'manual',
-  });
+  const downloadResp = await fetchWithAuth(
+    uri,
+    {
+      headers: reqHeaders,
+      redirect: 'manual',
+    },
+    env,
+  );
   const downloadUrl = downloadResp.headers.get('Location');
 
   if (!downloadUrl) {

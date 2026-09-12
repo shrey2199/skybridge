@@ -1,5 +1,4 @@
 import type { DriveItem, DriveItemCollection, DavDepth } from '../types/apiType';
-import { runtimeEnv } from '../types/env';
 import { fetchWithAuth, fetchBatchRes } from './fetchUtils';
 import { getSaveDelta } from './utils';
 import { createReturnXml, createPropfindXml, uploadChunk } from './davUtils';
@@ -14,7 +13,7 @@ export const davClient = {
   handlePut,
 };
 
-async function handlePropfind(filePath: string, depth: DavDepth) {
+async function handlePropfind(env: Env, filePath: string, depth: DavDepth) {
   const { path, parent } = parsePath(filePath);
   let data: DriveItemCollection = { value: [] };
   let selfEntry: DriveItem = {
@@ -23,7 +22,7 @@ async function handlePropfind(filePath: string, depth: DavDepth) {
     lastModifiedDateTime: new Date().toISOString(),
   };
 
-  const itemPathWrapped = buildUriPath(path, runtimeEnv.PROTECTED.EXPOSE_PATH, '');
+  const itemPathWrapped = buildUriPath(path, env.PROTECTED.EXPOSE_PATH, '');
   const baseEndpoint = `/me/drive/root${itemPathWrapped}`;
   const select = '?select=id,name,size,lastModifiedDateTime,file,@odata.etag';
 
@@ -37,7 +36,7 @@ async function handlePropfind(filePath: string, depth: DavDepth) {
 
   // Depth 0 returns the target itself only, no children lookup (any path)
   if (depth === '0') {
-    const batchResult = await fetchBatchRes(createBatchRequest([baseEndpoint + select]));
+    const batchResult = await fetchBatchRes(createBatchRequest([baseEndpoint + select]), env);
     const resp = batchResult.responses[0];
     if (resp.status !== 200) {
       return {
@@ -49,16 +48,16 @@ async function handlePropfind(filePath: string, depth: DavDepth) {
     return { davXml: createPropfindXml(entry.file ? parent : path, [entry]), davStatus: 207 };
   }
 
-  const savedData = await getSaveDelta(path);
+  const savedData = await getSaveDelta(env, path);
   const reqUrl = new URL(
     savedData?.['@odata.nextLink'] ??
       savedData?.['@odata.deltaLink'] ??
-      `${runtimeEnv.OAUTH.apiUrl}${itemPathWrapped}/children${select}&top=1000`,
+      `${env.OAUTH.apiUrl}${itemPathWrapped}/children${select}&top=1000`,
   );
   const reqEndpoint = (reqUrl.pathname + reqUrl.search).replace('v1.0', '');
 
   const batchRequest = createBatchRequest([baseEndpoint + select, reqEndpoint]);
-  const batchResult = await fetchBatchRes(batchRequest);
+  const batchResult = await fetchBatchRes(batchRequest, env);
 
   let childrenFailed = false;
   for (const resp of batchResult.responses) {
@@ -90,16 +89,15 @@ async function handlePropfind(filePath: string, depth: DavDepth) {
   // children endpoint results
   if (savedData?.['@odata.nextLink'] || data['@odata.nextLink']) {
     data.value = [...(savedData?.value || []), ...data.value];
-    await getSaveDelta(path, data);
+    await getSaveDelta(env, path, data);
   }
 
   // nextlink fetch finished, init delta link
   if (savedData && !data['@odata.nextLink'] && !data['@odata.deltaLink']) {
     const deltaPrams = `${select},parentReference,deleted&token=latest`;
     const deltaUrl =
-      buildUriPath(path, runtimeEnv.PROTECTED.EXPOSE_PATH, runtimeEnv.OAUTH.apiUrl) +
-      `/delta${deltaPrams}`;
-    const newDeltaResp = await fetchWithAuth(deltaUrl);
+      buildUriPath(path, env.PROTECTED.EXPOSE_PATH, env.OAUTH.apiUrl) + `/delta${deltaPrams}`;
+    const newDeltaResp = await fetchWithAuth(deltaUrl, {}, env);
     if (!newDeltaResp.ok) {
       return {
         davXml: createReturnXml(filePath, newDeltaResp.status, 'Failed to fetch delta'),
@@ -108,7 +106,7 @@ async function handlePropfind(filePath: string, depth: DavDepth) {
     }
     const newDeltaJson: DriveItemCollection = await newDeltaResp.json();
     newDeltaJson.value = [...data.value];
-    await getSaveDelta(path, newDeltaJson);
+    await getSaveDelta(env, path, newDeltaJson);
   }
 
   // fetch delta data
@@ -130,7 +128,7 @@ async function handlePropfind(filePath: string, depth: DavDepth) {
       }
     }
     data.value = Array.from(mergedMap.values());
-    await getSaveDelta(path, data);
+    await getSaveDelta(env, path, data);
   }
 
   data.value.unshift(selfEntry);
@@ -139,22 +137,31 @@ async function handlePropfind(filePath: string, depth: DavDepth) {
   return { davXml: responseXML, davStatus: 207 };
 }
 
-async function handleCopyMove(filePath: string, method: 'COPY' | 'MOVE', destination: string) {
+async function handleCopyMove(
+  env: Env,
+  filePath: string,
+  method: 'COPY' | 'MOVE',
+  destination: string,
+) {
   const { parent: newParent, tail: newTail } = parsePath(destination);
   const uri =
-    buildUriPath(filePath, runtimeEnv.PROTECTED.EXPOSE_PATH, runtimeEnv.OAUTH.apiUrl) +
+    buildUriPath(filePath, env.PROTECTED.EXPOSE_PATH, env.OAUTH.apiUrl) +
     (method === 'COPY' ? '/copy' : '');
 
-  const resp = await fetchWithAuth(uri, {
-    method: method === 'COPY' ? 'POST' : 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: newTail,
-      parentReference: {
-        path: `/drive/root:${runtimeEnv.PROTECTED.EXPOSE_PATH}${newParent}`,
-      },
-    }),
-  });
+  const resp = await fetchWithAuth(
+    uri,
+    {
+      method: method === 'COPY' ? 'POST' : 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: newTail,
+        parentReference: {
+          path: `/drive/root:${env.PROTECTED.EXPOSE_PATH}${newParent}`,
+        },
+      }),
+    },
+    env,
+  );
 
   const davStatus = resp.status === 200 ? 201 : resp.status;
   const responseXML =
@@ -163,9 +170,9 @@ async function handleCopyMove(filePath: string, method: 'COPY' | 'MOVE', destina
   return { davXml: responseXML, davStatus: davStatus };
 }
 
-async function handleDelete(filePath: string) {
-  const uri = buildUriPath(filePath, runtimeEnv.PROTECTED.EXPOSE_PATH, runtimeEnv.OAUTH.apiUrl);
-  const res = await fetchWithAuth(uri, { method: 'DELETE' });
+async function handleDelete(env: Env, filePath: string) {
+  const uri = buildUriPath(filePath, env.PROTECTED.EXPOSE_PATH, env.OAUTH.apiUrl);
+  const res = await fetchWithAuth(uri, { method: 'DELETE' }, env);
   const davStatus = res.status;
   const responseXML =
     davStatus === 204 ? null : createReturnXml(filePath, davStatus, res.statusText);
@@ -173,12 +180,12 @@ async function handleDelete(filePath: string) {
   return { davXml: responseXML, davStatus: davStatus };
 }
 
-async function handleHead(filePath: string) {
+async function handleHead(env: Env, filePath: string) {
   const uri = [
-    buildUriPath(filePath, runtimeEnv.PROTECTED.EXPOSE_PATH, runtimeEnv.OAUTH.apiUrl),
+    buildUriPath(filePath, env.PROTECTED.EXPOSE_PATH, env.OAUTH.apiUrl),
     '?select=size,file,folder,lastModifiedDateTime',
   ].join('');
-  const resp = await fetchWithAuth(uri);
+  const resp = await fetchWithAuth(uri, {}, env);
   const data: DriveItem = await resp.json();
 
   return {
@@ -194,20 +201,24 @@ async function handleHead(filePath: string) {
   };
 }
 
-async function handleMkcol(filePath: string) {
+async function handleMkcol(env: Env, filePath: string) {
   const { parent, tail } = parsePath(filePath);
   const uri =
-    buildUriPath(parent, runtimeEnv.PROTECTED.EXPOSE_PATH, runtimeEnv.OAUTH.apiUrl) + '/children';
+    buildUriPath(parent, env.PROTECTED.EXPOSE_PATH, env.OAUTH.apiUrl) + '/children';
 
-  const res = await fetchWithAuth(uri, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: tail,
-      folder: {},
-      '@microsoft.graph.conflictBehavior': 'replace',
-    }),
-  });
+  const res = await fetchWithAuth(
+    uri,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: tail,
+        folder: {},
+        '@microsoft.graph.conflictBehavior': 'replace',
+      }),
+    },
+    env,
+  );
 
   const davStatus = res.status === 200 ? 201 : res.status;
   const responseXML =
@@ -216,7 +227,7 @@ async function handleMkcol(filePath: string) {
   return { davXml: responseXML, davStatus: davStatus };
 }
 
-async function handlePut(filePath: string, request: Request) {
+async function handlePut(env: Env, filePath: string, request: Request) {
   const simpleUploadLimit = 4 * 1024 * 1024; // 4MB
   const chunkSize = 60 * 1024 * 1024;
   const contentLength = request.headers.get('Content-Length') || '0';
@@ -225,9 +236,8 @@ async function handlePut(filePath: string, request: Request) {
   if (fileSize <= simpleUploadLimit) {
     const body = await request.arrayBuffer();
     const uri =
-      buildUriPath(filePath, runtimeEnv.PROTECTED.EXPOSE_PATH, runtimeEnv.OAUTH.apiUrl) +
-      '/content';
-    const res = await fetchWithAuth(uri, { method: 'PUT', body });
+      buildUriPath(filePath, env.PROTECTED.EXPOSE_PATH, env.OAUTH.apiUrl) + '/content';
+    const res = await fetchWithAuth(uri, { method: 'PUT', body }, env);
 
     const davXml = res.ok ? null : createReturnXml(filePath, res.status, res.statusText);
     const davStatus = res.status === 200 ? 204 : res.status;
@@ -235,15 +245,18 @@ async function handlePut(filePath: string, request: Request) {
   }
 
   const uri =
-    buildUriPath(filePath, runtimeEnv.PROTECTED.EXPOSE_PATH, runtimeEnv.OAUTH.apiUrl) +
-    '/createUploadSession';
-  const uploadSessionRes = await fetchWithAuth(uri, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      item: { '@microsoft.graph.conflictBehavior': 'replace' },
-    }),
-  });
+    buildUriPath(filePath, env.PROTECTED.EXPOSE_PATH, env.OAUTH.apiUrl) + '/createUploadSession';
+  const uploadSessionRes = await fetchWithAuth(
+    uri,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        item: { '@microsoft.graph.conflictBehavior': 'replace' },
+      }),
+    },
+    env,
+  );
 
   const { uploadUrl } = (await uploadSessionRes.json()) as { uploadUrl: string };
   const reader = request.body!.getReader();

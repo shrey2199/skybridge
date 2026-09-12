@@ -1,4 +1,4 @@
-import type { PostPayload } from '../types/apiType';
+import type { PostPayload, TokenScope } from '../types/apiType';
 import { fetchFiles, fetchUploadLinks } from '../services/fileMethods';
 import { saveDeployData } from '../services/deployMethods';
 import { authorizeActions, isGlobalGateActive, verifyGlobalPassword } from '../services/authUtils';
@@ -9,6 +9,7 @@ export async function handlePostRequest(
   request: Request,
   env: Env,
   requestUrl: URL,
+  preAuth?: Set<TokenScope>,
 ): Promise<Response> {
   const jellyfinResponse = await handleJellyfinJobPost(request, env, requestUrl);
   if (jellyfinResponse) {
@@ -65,25 +66,29 @@ export async function handlePostRequest(
       });
     }
 
-    const uploadLinks = JSON.stringify(await fetchUploadLinks(body.files));
+    const uploadLinks = JSON.stringify(await fetchUploadLinks(env, body.files));
     return new Response(uploadLinks, {
       headers: returnHeaders,
     });
   }
 
   // List a folder
-  const isListAllowed = (
-    await authorizeActions(['list'], {
-      env,
-      url: requestUrl,
-      passwd: body.passwd,
-      globalPasswd: body.globalPasswd,
-      postPath: requestPath,
-    })
-  ).has('list');
+  // preAuth comes from the cache layer's earlier authorization for this exact
+  // request (same credentials); only re-run the folder-lock checks without it
+  const isListAllowed = preAuth
+    ? preAuth.has('list')
+    : (
+        await authorizeActions(['list'], {
+          env,
+          url: requestUrl,
+          passwd: body.passwd,
+          globalPasswd: body.globalPasswd,
+          postPath: requestPath,
+        })
+      ).has('list');
 
   const filesRes = isListAllowed
-    ? await fetchFiles(requestPath, body.skipToken, body.orderby)
+    ? await fetchFiles(env, requestPath, body.skipToken, body.orderby)
     : {
         parent: requestPath,
         files: [],

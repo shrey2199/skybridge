@@ -230,8 +230,8 @@ function parseRetryAfter(response: Response): number | undefined {
   return Number.isNaN(date) ? undefined : Math.max(1, Math.ceil((date - Date.now()) / 1000));
 }
 
-async function graphResponse(uri: string, init: RequestInit = {}) {
-  const response = await fetchWithAuth(uri, init);
+async function graphResponse(env: Env, uri: string, init: RequestInit = {}) {
+  const response = await fetchWithAuth(uri, init, env);
   if (response.status === 429 || response.status >= 500) {
     throw new GraphRequestError(
       `Microsoft Graph returned ${response.status} ${response.statusText}`,
@@ -256,6 +256,7 @@ function itemUri(env: Env, path: string) {
 
 async function getDriveItem(env: Env, path: string): Promise<DriveItem | null> {
   const response = await graphResponse(
+    env,
     `${itemUri(env, path)}?$select=id,name,size,lastModifiedDateTime,file,folder,eTag`,
   );
   if (response.status === 404) {
@@ -268,7 +269,7 @@ async function getDriveItem(env: Env, path: string): Promise<DriveItem | null> {
 }
 
 async function readTextFile(env: Env, path: string): Promise<string | null> {
-  const response = await graphResponse(`${itemUri(env, path)}/content`, { redirect: 'manual' });
+  const response = await graphResponse(env, `${itemUri(env, path)}/content`, { redirect: 'manual' });
   if (response.status === 404) {
     return null;
   }
@@ -298,7 +299,7 @@ async function listDrivePage(
   const uri =
     nextLink ??
     `${itemUri(env, path)}/children?$select=id,name,size,lastModifiedDateTime,file,folder&$top=${top}`;
-  const response = await graphResponse(uri);
+  const response = await graphResponse(env, uri);
   if (response.status === 404) {
     return { value: [] };
   }
@@ -320,7 +321,7 @@ async function ensureDirectory(env: Env, path: string): Promise<'created' | 'exi
   const segments = path.split('/');
   const name = segments.pop()!;
   const parent = segments.join('/') || '/';
-  const response = await graphResponse(`${itemUri(env, parent)}/children`, {
+  const response = await graphResponse(env, `${itemUri(env, parent)}/children`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -342,7 +343,7 @@ async function ensureDirectory(env: Env, path: string): Promise<'created' | 'exi
 }
 
 async function writeTextFile(env: Env, path: string, content: string, contentType: string) {
-  const response = await graphResponse(`${itemUri(env, path)}/content`, {
+  const response = await graphResponse(env, `${itemUri(env, path)}/content`, {
     method: 'PUT',
     headers: { 'Content-Type': contentType },
     body: content,
@@ -353,7 +354,7 @@ async function writeTextFile(env: Env, path: string, content: string, contentTyp
 }
 
 async function deleteDriveItem(env: Env, path: string) {
-  const response = await graphResponse(itemUri(env, path), { method: 'DELETE' });
+  const response = await graphResponse(env, itemUri(env, path), { method: 'DELETE' });
   if (response.status !== 204 && response.status !== 404) {
     throw await responseError(response, `Unable to delete ${path}`);
   }

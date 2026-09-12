@@ -3,6 +3,7 @@ import { authorizeActions } from '../services/authUtils';
 import { handleWebdav } from './dav-handler';
 import { handleGetRequest } from './get-handler';
 import { handlePostRequest } from './post-handler';
+import type { TokenScope } from '../types/apiType';
 
 export async function cacheRequest(
   request: Request,
@@ -12,6 +13,10 @@ export async function cacheRequest(
   const requestUrl = new URL(request.url);
   // Job state and explicit file links are dynamic and must never share cache entries.
   if (requestUrl.pathname.startsWith('/api/jellyfin/') || requestUrl.searchParams.has('file')) {
+    return handleRequest(request, env);
+  }
+  // Upload-link responses are single-use and must not be served from cache
+  if (request.method === 'POST' && requestUrl.searchParams.has('upload')) {
     return handleRequest(request, env);
   }
 
@@ -36,11 +41,11 @@ export async function cacheRequest(
   }
 
   const reqBody = method === 'POST' ? await request.clone().text() : '{}';
-  const parsedBody = parseJson<{ path?: string; globalPasswd?: string }>(reqBody);
+  const parsedBody = parseJson<{ path?: string; globalPasswd?: string; passwd?: string }>(reqBody);
   const tokenScopeSet = await authorizeActions(['download', 'refresh', 'list'], {
     env,
     url: cacheUrl,
-    passwd: request.headers.get('Authorization') ?? undefined,
+    passwd: parsedBody?.passwd ?? request.headers.get('Authorization') ?? undefined,
     globalPasswd: parsedBody?.globalPasswd,
     postPath: parsedBody?.path,
   });
@@ -70,7 +75,7 @@ export async function cacheRequest(
   const isForceRefresh = tokenScopeSet.has('refresh');
 
   if (!cachedResponse || isCacheExpired || isForceRefresh) {
-    const upstreamResponse = await handleRequest(request, env);
+    const upstreamResponse = await handleRequest(request, env, tokenScopeSet);
     const freshResponse = new Response(upstreamResponse.body, upstreamResponse);
 
     freshResponse.headers.set('Expires', new Date(Date.now() + cacheTTL * 1000).toUTCString());
@@ -83,7 +88,7 @@ export async function cacheRequest(
   return cachedResponse;
 }
 
-async function handleRequest(request: Request, env: Env): Promise<Response> {
+async function handleRequest(request: Request, env: Env, preAuth?: Set<TokenScope>): Promise<Response> {
   const url = new URL(request.url);
   const allowMethods = [
     'COPY',
@@ -118,14 +123,14 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
       });
     // Download a file or display web
     case 'GET':
-      return handleGetRequest(request, env, url);
+      return handleGetRequest(request, env, url, preAuth);
     case 'HEAD':
       return url.searchParams.has('file')
-        ? handleGetRequest(request, env, url)
+        ? handleGetRequest(request, env, url, preAuth)
         : handleWebdav(request, env, url);
     // Upload or List files
     case 'POST':
-      return handlePostRequest(request, env, url);
+      return handlePostRequest(request, env, url, preAuth);
     default:
       return handleWebdav(request, env, url);
   }

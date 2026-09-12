@@ -1,7 +1,20 @@
 import { minify } from 'html-minifier-terser';
 import fs from 'fs';
+import path from 'path';
 
-const input = fs.readFileSync('front-end/sb/index.html', 'utf8');
+const sourceDir = 'front-end/sb';
+const outputDir = 'dist/front-end/sb';
+
+fs.rmSync('dist', { recursive: true, force: true });
+fs.mkdirSync(outputDir, { recursive: true });
+
+// static assets are copied verbatim; only index.html gets minified
+for (const entry of fs.readdirSync(sourceDir)) {
+  if (entry === 'index.html') continue;
+  fs.copyFileSync(path.join(sourceDir, entry), path.join(outputDir, entry));
+}
+
+const input = fs.readFileSync(path.join(sourceDir, 'index.html'), 'utf8');
 
 minify(input, {
   collapseWhitespace: true,
@@ -12,6 +25,6 @@ minify(input, {
   useShortDoctype: true,
   removeEmptyAttributes: true,
 }).then((minified) => {
-  fs.writeFileSync('front-end/sb/index.html', minified);
-  console.log('Minification complete!');
+  fs.writeFileSync(path.join(outputDir, 'index.html'), minified);
+  console.log('Minification complete: dist/front-end/sb/index.html');
 });

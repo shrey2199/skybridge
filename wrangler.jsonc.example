@@ -4,7 +4,7 @@
   "compatibility_date": "2025-04-10",
   "preview_urls": false,
   "assets": {
-    "directory": "./front-end/",
+    "directory": "./dist/front-end/",
     "binding": "ASSETS",
     "run_worker_first": [
       "/*",
@@ -53,9 +53,9 @@
       "POST": 0
     }
   },
-  // "build": {
-  //   "command": "npm run build"
-  // },
+  "build": {
+    "command": "npm run build"
+  },
   // "routes": [
   //   {
   //     "pattern": "subdomain.example.com/*",
