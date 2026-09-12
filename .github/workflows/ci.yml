@@ -11,6 +11,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
+      # worker.d.ts is generated and gitignored; typecheck needs it, and
+      # generating it needs a wrangler config (only the example is committed).
+      # The template ships an empty KV id which wrangler's parser rejects,
+      # so substitute a placeholder before running any wrangler command.
+      - name: Restore wrangler config and generate types
+        run: |
+          cp wrangler.jsonc.example wrangler.jsonc
+          sed -i 's/"id": ""/"id": "00000000000000000000000000000000"/' wrangler.jsonc
+          bun run type
       - run: bun run typecheck
       - run: bun run test
       # validates the wrangler config and bundle without deploying
