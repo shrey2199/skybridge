@@ -30,6 +30,10 @@ export async function cacheRequest(
   if (request.headers.get('Authorization') && !isDavGetCache) {
     return handleRequest(request, env);
   }
+  // Range requests must never share a cache entry with full downloads
+  if (method === 'GET' && request.headers.has('Range')) {
+    return handleRequest(request, env);
+  }
 
   const reqBody = method === 'POST' ? await request.clone().text() : '{}';
   const parsedBody = parseJson<{ path?: string; globalPasswd?: string }>(reqBody);
@@ -48,8 +52,10 @@ export async function cacheRequest(
   };
   const key = await requestKeyGenerators[method]();
 
+  // format changes the response body (e.g. ?format=pdf), so it must be part of the key
+  const format = requestUrl.searchParams.get('format');
   cacheUrl.search = ''; // avoid query parameters affecting cache entry
-  cacheUrl.pathname = `/${method}/${key}` + cacheUrl.pathname;
+  cacheUrl.pathname = `/${method}/${key}` + (format ? `/format-${format}` : '') + cacheUrl.pathname;
   const cacheKey = new Request(cacheUrl.toString().toLowerCase());
   const cache = (caches as any).default;
   const cachedResponse: Response | null = await cache.match(cacheKey);

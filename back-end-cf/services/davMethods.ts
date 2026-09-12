@@ -23,21 +23,9 @@ async function handlePropfind(filePath: string, depth: DavDepth) {
     lastModifiedDateTime: new Date().toISOString(),
   };
 
-  // Root folder with depth 0, no need to fetch items
-  if (path === '' && depth === '0') {
-    return { davXml: createPropfindXml('', [selfEntry]), davStatus: 207 };
-  }
-
-  const savedData = await getSaveDelta(path);
   const itemPathWrapped = buildUriPath(path, runtimeEnv.PROTECTED.EXPOSE_PATH, '');
   const baseEndpoint = `/me/drive/root${itemPathWrapped}`;
   const select = '?select=id,name,size,lastModifiedDateTime,file,@odata.etag';
-  const reqUrl = new URL(
-    savedData?.['@odata.nextLink'] ??
-      savedData?.['@odata.deltaLink'] ??
-      `${runtimeEnv.OAUTH.apiUrl}${itemPathWrapped}/children${select}&top=1000`,
-  );
-  const reqEndpoint = (reqUrl.pathname + reqUrl.search).replace('v1.0', '');
 
   const createBatchRequest = (endpoints: string[]) => ({
     requests: endpoints.map((endpoint, index) => ({
@@ -47,11 +35,40 @@ async function handlePropfind(filePath: string, depth: DavDepth) {
     })),
   });
 
+  // Depth 0 returns the target itself only, no children lookup (any path)
+  if (depth === '0') {
+    const batchResult = await fetchBatchRes(createBatchRequest([baseEndpoint + select]));
+    const resp = batchResult.responses[0];
+    if (resp.status !== 200) {
+      return {
+        davXml: createReturnXml(filePath, resp.status, 'Failed to fetch files'),
+        davStatus: resp.status,
+      };
+    }
+    const entry = resp.body as DriveItem;
+    return { davXml: createPropfindXml(entry.file ? parent : path, [entry]), davStatus: 207 };
+  }
+
+  const savedData = await getSaveDelta(path);
+  const reqUrl = new URL(
+    savedData?.['@odata.nextLink'] ??
+      savedData?.['@odata.deltaLink'] ??
+      `${runtimeEnv.OAUTH.apiUrl}${itemPathWrapped}/children${select}&top=1000`,
+  );
+  const reqEndpoint = (reqUrl.pathname + reqUrl.search).replace('v1.0', '');
+
   const batchRequest = createBatchRequest([baseEndpoint + select, reqEndpoint]);
   const batchResult = await fetchBatchRes(batchRequest);
 
+  let childrenFailed = false;
   for (const resp of batchResult.responses) {
     if (resp.status !== 200) {
+      if (resp.id === '2') {
+        // children lookup fails on non-folders (getChildrenOnNonFolder);
+        // PROPFIND on a file legitimately returns the resource itself
+        childrenFailed = true;
+        continue;
+      }
       return {
         davXml: createReturnXml(filePath, resp.status, 'Failed to fetch files'),
         davStatus: resp.status,
@@ -64,6 +81,10 @@ async function handlePropfind(filePath: string, depth: DavDepth) {
     } else {
       data = resp.body as DriveItemCollection;
     }
+  }
+
+  if (childrenFailed) {
+    return { davXml: createPropfindXml(parent, [selfEntry]), davStatus: 207 };
   }
 
   // children endpoint results

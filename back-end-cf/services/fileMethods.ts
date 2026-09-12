@@ -44,20 +44,40 @@ export async function fetchFiles(
 }
 
 export async function fetchUploadLinks(fileList: UploadPayload[]) {
+  // Empty files cannot use createUploadSession, and a batch PUT would send a
+  // literal "{}" body that corrupts them — create them directly instead.
+  await Promise.all(
+    fileList
+      .filter((file) => !file['fileSize'])
+      .map(async (file) => {
+        const uri =
+          runtimeEnv.OAUTH.apiUrl +
+          buildUriPath(file['remotePath'], runtimeEnv.PROTECTED.EXPOSE_PATH, '') +
+          '/content';
+        const res = await fetchWithAuth(uri, { method: 'PUT', body: '' });
+        if (!res.ok) {
+          throw new Error(`Failed to create empty file ${file['remotePath']}: ${res.status}`);
+        }
+      }),
+  );
+
+  const sessionFiles = fileList.filter((file) => Boolean(file['fileSize']));
   const batchRequest = {
-    requests: fileList.map((file, index) => ({
+    requests: sessionFiles.map((file, index) => ({
       id: `${index + 1}`,
-      method: file['fileSize'] ? 'POST' : 'PUT',
-      url: `/me/drive/root${buildUriPath(file['remotePath'], runtimeEnv.PROTECTED.EXPOSE_PATH, '')}${file['fileSize'] ? '/createUploadSession' : '/content'}`,
+      method: 'POST',
+      url: `/me/drive/root${buildUriPath(file['remotePath'], runtimeEnv.PROTECTED.EXPOSE_PATH, '')}/createUploadSession`,
       headers: { 'Content-Type': 'application/json' },
       body: {},
     })),
   };
   const batchResult = await fetchBatchRes(batchRequest);
   batchResult.responses.forEach((response) => {
-    if (response.status === 200) {
-      const index = parseInt(response.id) - 1;
-      fileList[index].uploadUrl = (response.body as { uploadUrl: string }).uploadUrl;
+    if (response.status === 200 || response.status === 201) {
+      const file = sessionFiles[parseInt(response.id) - 1];
+      if (file) {
+        file.uploadUrl = (response.body as { uploadUrl: string }).uploadUrl;
+      }
     }
   });
   return { files: fileList };

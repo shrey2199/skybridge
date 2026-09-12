@@ -3861,7 +3861,7 @@
 
       const odPath = window.backForwardCache.current;
       const upFileList = fileInput.map((f) => ({
-        remotePath: `${odPath}/${relativePath(f)}`,
+        remotePath: `${odPath === '/' ? '' : odPath}/${relativePath(f)}`,
         fileSize: f.size ? 1 : 0,
       }));
 

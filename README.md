@@ -27,12 +27,13 @@ SkyBridge - Serverless OneDrive Index and WebDAV Engine
 > Supported only for personal accounts; use alternatives for other types account. Creating your own app is recommended.
 
 1. [Import the project to your private Github repository](https://docs.github.com/en/migrations/importing-source-code/using-github-importer/importing-a-repository-with-github-importer#importing-a-repository-with-github-importer)
-2. Edit `wrangler.jsonc` and commit changes
+2. Copy `wrangler.jsonc.example` to `wrangler.jsonc`, fill in your OAuth credentials, KV namespace id, and passwords, then commit it to your **private** repository (`wrangler.jsonc` is gitignored in this public repo so real secrets never land in shared history)
 3. [Import your Github repository from Cloudflare console](https://dash.cloudflare.com/?to=/:account/workers-and-pages/create)
 4. Access your domain with `/deploysb` to complete OneDrive authorization
 
 > [!NOTE]
 > You need to get the [kv_namespaces id](https://dash.cloudflare.com/?to=/:account/workers/kv/namespaces) and fill it in `wrangler.jsonc`
+> In a private deployment repo you may remove the `wrangler.jsonc` line from `.gitignore` if you prefer to track it.
 
 <details>
     <summary>Or</summary>
@@ -42,7 +43,7 @@ SkyBridge - Serverless OneDrive Index and WebDAV Engine
 ```sh
 git clone <your-fork-url>
 cd SkyBridge
-# edit wrangler.jsonc, then
+# copy wrangler.jsonc.example to wrangler.jsonc and edit it, then
 bun install
 bun run deploy
 # webdav config
@@ -94,7 +95,7 @@ bunx wrangler secret put PASSWORD
 
 ```sh
 bun install
-# edit wrangler.jsonc, then
+# copy wrangler.jsonc.example to wrangler.jsonc and edit it, then
 bun run type
 bun run dev
 ```

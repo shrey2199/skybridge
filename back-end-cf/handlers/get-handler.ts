@@ -25,6 +25,12 @@ export async function handleGetRequest(
     return Response.redirect(target.toString(), 302);
   }
 
+  // site root redirects to the frontend
+  if (requestUrl.pathname === '/' || requestUrl.pathname === '') {
+    const target = new URL('/sb' + requestUrl.search, requestUrl.origin);
+    return Response.redirect(target.toString(), 302);
+  }
+
   // download files
   const isProxyRequest = Boolean(
     env.PROTECTED.PROXY_KEYWORD &&
