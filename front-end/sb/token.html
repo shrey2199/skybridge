@@ -536,30 +536,57 @@
       let algo = document.getElementById('algo').value;
       let message = document.getElementById('message').value;
       
+      if (type === 'token') {
+        let path = document.getElementById('tokenPath').value.trim();
+        let key = document.getElementById('key').value;
+        if (!path) {
+          result.innerText = 'Please enter a token path';
+          return;
+        }
+        if (!key.trim()) {
+          result.innerText = 'Please enter the worker PASSWORD secret as key';
+          return;
+        }
+        let scope = Array.from(document.getElementById('tokenScope').selectedOptions).map((el) => el.value);
+        if (!scope.length) {
+          result.innerText = 'Please select at least one scope';
+          return;
+        }
+
+        // Backend verifies HMAC-SHA256(secret, "<path>,<ts>[,<te>]") — scope
+        // order in ts is significant, te is unix seconds, tb is required for recursive
+        let ts = scope.join(',');
+        let te = '';
+        let expire = document.getElementById('tokenExpire').value;
+        if (expire === '1d') {
+          te = String(Math.floor(Date.now() / 1000) + 86400);
+        } else if (expire === '7d') {
+          te = String(Math.floor(Date.now() / 1000) + 604800);
+        } else if (expire === 'custom') {
+          let ms = new Date(document.getElementById('tokenExpireCustom').value).getTime();
+          if (isNaN(ms)) {
+            result.innerText = 'Please pick a valid custom expiry';
+            return;
+          }
+          te = String(Math.floor(ms / 1000));
+        }
+
+        let tokenArgString = [path, ts, te].filter(Boolean).join(',');
+        let token = await hmacHash(tokenArgString, key, 'SHA-256');
+        let params = new URLSearchParams({ token: token, ts: ts });
+        if (te) params.set('te', te);
+        if (scope.includes('recursive')) params.set('tb', path);
+
+        let url = `${window.location.origin}${path}?${params.toString()}`;
+        result.innerText = `${token}\n\n${url}`;
+        return;
+      }
+
       if (!message.trim()) {
         result.innerText = 'Please enter a message/password';
         return;
       }
 
-      if (type === 'token') {
-        let path = document.getElementById('tokenPath').value;
-        let scope = Array.from(document.getElementById('tokenScope').selectedOptions).map((el) => el.value);
-        let expire = document.getElementById('tokenExpire').value;
-        
-        if (expire === 'custom') {
-          expire = new Date(document.getElementById('tokenExpireCustom').value).getTime();
-        }
-        
-        let r = {
-          path: path,
-          password: await hashOnly(message, algo),
-          scope: scope
-        };
-        if (expire) r.expire = expire;
-        result.innerText = btoa(JSON.stringify(r));
-        return;
-      }
-      
       if (type === 'hmac') {
         let key = document.getElementById('key').value;
         if (!key.trim()) {
@@ -575,21 +602,24 @@
     // Type selector change
     document.getElementById('algoType').addEventListener('change', function (event) {
       let type = event.target.value;
+      let keyInput = document.getElementById('key');
       if (type === 'hmac') {
         document.getElementById('keyBlock').style.display = 'block';
         document.getElementById('algoBlock').style.display = 'block';
         document.getElementById('tokenBlock').style.display = 'none';
         document.getElementById('messageBlock').style.display = 'block';
+        keyInput.placeholder = 'Enter key';
       } else if (type === 'hash') {
         document.getElementById('keyBlock').style.display = 'none';
         document.getElementById('algoBlock').style.display = 'block';
         document.getElementById('tokenBlock').style.display = 'none';
         document.getElementById('messageBlock').style.display = 'block';
       } else {
-        document.getElementById('keyBlock').style.display = 'none';
-        document.getElementById('algoBlock').style.display = 'block';
+        document.getElementById('keyBlock').style.display = 'block';
+        document.getElementById('algoBlock').style.display = 'none';
         document.getElementById('tokenBlock').style.display = 'block';
-        document.getElementById('messageBlock').style.display = 'block';
+        document.getElementById('messageBlock').style.display = 'none';
+        keyInput.placeholder = 'Worker PASSWORD secret (used to sign the token)';
       }
     });
 

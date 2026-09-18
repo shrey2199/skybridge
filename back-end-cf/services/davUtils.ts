@@ -1,13 +1,20 @@
 import type { DriveItem, DavDepth } from '../types/apiType';
 
+// RFC 4918 §11: non-207 errors must not use a <d:multistatus> body —
+// use a DAV:error condition element instead
 export function createReturnXml(uriPath: string, davStatus: number, statusText: string) {
   return `<?xml version="1.0" encoding="utf-8"?>
-  <d:multistatus xmlns:d="DAV:">
-    <d:response>
-      <d:href>${uriPath.split('/').map(encodeURIComponent).join('/')}</d:href>
-      <d:status>HTTP/1.1 ${davStatus} ${statusText}</d:status>
-    </d:response>
-  </d:multistatus>`;
+<D:error xmlns:D="DAV:">
+  <D:responsedescription>${escapeXml(`${uriPath}: ${davStatus} ${statusText}`)}</D:responsedescription>
+</D:error>`;
+}
+
+function escapeXml(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
 }
 
 export function createPropfindXml(parent: string, files: DriveItem[]) {

@@ -148,20 +148,51 @@ async function handleCopyMove(
     buildUriPath(filePath, env.PROTECTED.EXPOSE_PATH, env.OAUTH.apiUrl) +
     (method === 'COPY' ? '/copy' : '');
 
+  // a trailing-slash destination parses to an empty tail; omit name so Graph keeps the source name
+  const body: Record<string, unknown> = {
+    parentReference: {
+      path: `/drive/root:${env.PROTECTED.EXPOSE_PATH}${newParent}`,
+    },
+  };
+  if (newTail) {
+    body.name = newTail;
+  }
+
   const resp = await fetchWithAuth(
     uri,
     {
       method: method === 'COPY' ? 'POST' : 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: newTail,
-        parentReference: {
-          path: `/drive/root:${env.PROTECTED.EXPOSE_PATH}${newParent}`,
-        },
-      }),
+      body: JSON.stringify(body),
     },
     env,
   );
+
+  // Graph /copy is async: 202 + a monitor URL that turns 200/303 when done.
+  // WebDAV clients (rclone, Windows) require 201/204, so poll briefly.
+  if (method === 'COPY' && resp.status === 202) {
+    const monitorUrl = resp.headers.get('Location');
+    if (monitorUrl) {
+      for (let attempt = 0; attempt < 15; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const monitorResp = await fetchWithAuth(monitorUrl, {}, env);
+        if (monitorResp.status === 200 || monitorResp.status === 303) {
+          return { davXml: null, davStatus: 201 };
+        }
+        if (monitorResp.status !== 202) {
+          return {
+            davXml: createReturnXml(filePath, monitorResp.status, monitorResp.statusText),
+            davStatus: monitorResp.status,
+          };
+        }
+      }
+      // still copying after the deadline; report best effort
+      return {
+        davXml: createReturnXml(filePath, 202, 'Copy still in progress'),
+        davStatus: 202,
+      };
+    }
+  }
 
   const davStatus = resp.status === 200 ? 201 : resp.status;
   const responseXML =
@@ -188,9 +219,22 @@ async function handleHead(env: Env, filePath: string) {
   const resp = await fetchWithAuth(uri, {}, env);
   const data: DriveItem = await resp.json();
 
+  // folders must return 200 with directory metadata, not 403
+  if (data?.folder) {
+    return {
+      davXml: null,
+      davStatus: 200,
+      davHeaders: {
+        'Content-Length': '0',
+        'Content-Type': 'httpd/unix-directory',
+        'Last-Modified': new Date(data.lastModifiedDateTime).toUTCString(),
+      },
+    };
+  }
+
   return {
     davXml: null,
-    davStatus: data?.folder ? 403 : resp.status,
+    davStatus: resp.status,
     davHeaders: data?.file
       ? {
           'Content-Length': data.size.toString(),

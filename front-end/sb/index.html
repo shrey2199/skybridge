@@ -1920,14 +1920,23 @@
           const responseData = await response.text();
           callback(responseData);
         } else {
-          throw new Error(`HTTP error! Status: ${response.status}`);
+          // HTTP error statuses are final — do not retry a 401/404
+          const body = await response.text().catch(() => '');
+          throw Object.assign(
+            new Error(`HTTP error! Status: ${response.status}${body ? ` — ${body}` : ''}`),
+            { isHttpError: true, status: response.status },
+          );
         }
       } catch (err) {
-        console.log({ url, data, times });
-        if (times < 1) {
-          sendRequest(method, url, data, headers, callback, error, times + 1);
+        console.log({ url, data, times, error: err.message });
+        // retry only network/timeout failures once, with a short backoff
+        if (times < 1 && !err.isHttpError) {
+          setTimeout(
+            () => sendRequest(method, url, data, headers, callback, error, times + 1),
+            1000,
+          );
         } else if (typeof error === 'function') {
-          error();
+          error(err);
         }
       }
     }
@@ -2547,7 +2556,7 @@
               input.placeholder = 'Incorrect password';
             } else {
               window.fileCache.set(newFiles.parent, newFiles);
-              window.fileCache.set(folderPasswordKey(newFiles.parent), passwd);
+              window.fileCache.set(folderPasswordKey(newFiles.parent), obfuscate(passwd));
               fetchFileList(newFiles.parent);
             }
           },
@@ -2735,7 +2744,9 @@
                 return 'text';
               } else if (['upload'].includes(suffix)) {
                 return 'upload';
-              } else if (['mp4', 'avi', 'mkv', 'flv', 'm3u8'].includes(suffix)) {
+              } else if (['mp4', 'mkv', 'flv', 'm3u8'].includes(suffix)) {
+                // avi omitted: no browser decodes the container; mkv plays in
+                // Chromium when the streams inside are H.264
                 return 'video';
               }
             },
@@ -3272,6 +3283,24 @@
       return `${path === '/' ? '' : path}/.password`;
     }
 
+    // Shoulder-sniffing mitigation only, not encryption — the raw password
+    // must still reach the backend on every request for locked folders.
+    function obfuscate(value) {
+      const bytes = new TextEncoder()
+        .encode(value)
+        .map((b, i) => b ^ (0x5a + (i % 16)));
+      return btoa(String.fromCharCode(...bytes));
+    }
+
+    function deobfuscate(value) {
+      try {
+        const bytes = [...atob(value)].map((c, i) => c.charCodeAt(0) ^ (0x5a + (i % 16)));
+        return new TextDecoder().decode(new Uint8Array(bytes));
+      } catch (_) {
+        return value;
+      }
+    }
+
     /**
      * Password for a folder, inherited from the nearest unlocked ancestor:
      * walks from the requested path up to the root and returns the first
@@ -3280,7 +3309,8 @@
     function inheritedPassword(path) {
       let current = path;
       while (current !== undefined) {
-        const passwd = window.fileCache.get(folderPasswordKey(current));
+        const stored = window.fileCache.get(folderPasswordKey(current));
+        const passwd = stored ? deobfuscate(stored) : undefined;
         if (passwd) {
           return passwd;
         }
@@ -3400,38 +3430,32 @@
     }
 
     function back() {
+      // first press while previewing exits the preview without a history entry
+      if (window.backForwardCache.preview) {
+        fetchFileList(window.backForwardCache.current, undefined, true);
+        return;
+      }
       if (!window.backForwardCache.backable) {
         return;
       }
-      if (window.backForwardCache.preview) {
-        fetchFileList(window.backForwardCache.current);
-      } else {
-        let former = (() => {
-          const formerEndIndex = window.backForwardCache.current.lastIndexOf('/');
-          return window.backForwardCache.current.substring(0, formerEndIndex);
-        })();
-        former = former || window.api.root;
-        fetchFileList(former);
-        switchBackForwardStatus();
-      }
-      // console.log(window.backForwardCache);
+      history.back();
     }
 
     function forward() {
       if (!window.backForwardCache.forwardable) {
         return;
       }
-      const current =
-        window.backForwardCache.current === window.api.root
-          ? ''
-          : window.backForwardCache.current;
-      const subLength = current ? current.length : 0;
-      const later =
-        current + '/' + window.backForwardCache.deepest.substring(subLength).split('/')[1];
-      fetchFileList(later);
-      switchBackForwardStatus();
-      // console.log(window.backForwardCache);
+      history.forward();
     }
+
+    // browser back/forward re-renders the folder recorded in the history entry
+    window.addEventListener('popstate', (event) => {
+      const path =
+        event.state?.path ??
+        new URLSearchParams(window.location.search).get('path') ??
+        window.api.root;
+      fetchFileList(path, undefined, true);
+    });
 
     async function preCache(files, level) {
       if (!window.GLOBAL_CONFIG.PRELOAD) {
@@ -3551,7 +3575,17 @@
       fetchFileList(loadedPages.parent, loadedPages.orderby);
     }
 
-    function fetchFileList(path, orderby) {
+    function pushHistoryState(path) {
+      const url = new URL(window.location.href);
+      if (path === window.api.root) {
+        url.searchParams.delete('path');
+      } else {
+        url.searchParams.set('path', path);
+      }
+      history.pushState({ path }, '', url);
+    }
+
+    function fetchFileList(path, orderby, fromHistory) {
       window.backForwardCache.preview = false;
       window.backForwardCache.current = path;
 
@@ -3559,13 +3593,16 @@
       if (cache === true) {
         setTimeout(() => fetchFileList(path), 300);
       } else if (cache) {
+        if (!fromHistory) {
+          pushHistoryState(path);
+        }
         renderPage(null, cache);
         preCacheCheck(cache, path);
       } else {
         const indicator = createGlobalLoadingIndicator();
-        const fallback = () => {
+        const fallback = (err) => {
           window.fileCache.delete(path);
-          indicator.close('Failed!');
+          indicator.close(err ? `Failed! ${err.message}` : 'Failed!');
         };
         window.fileCache.set(path, true);
 
@@ -3605,6 +3642,9 @@
               saveGlobalAuth(window.globalAuth.passwd);
             }
             hideGlobalGate();
+            if (!fromHistory) {
+              pushHistoryState(path);
+            }
             renderPage(data);
           },
           fallback,
@@ -3619,8 +3659,8 @@
 
       const indicator = createGlobalLoadingIndicator('Loading next page...');
       loadedPages.loadingInProgress = true;
-      const fallback = () => {
-        indicator.close('Failed!');
+      const fallback = (err) => {
+        indicator.close(err ? `Failed! ${err.message}` : 'Failed!');
         loadedPages.loadingInProgress = false;
       };
       sendRequest(
@@ -3901,6 +3941,9 @@
               ),
             ).finally(() => sendPage(pageIndex + 1));
           },
+          (err) => {
+            createUploadLogLine().textContent = `Upload failed: ${err?.message ?? 'unknown error'}`;
+          },
         );
       }
 
@@ -4040,7 +4083,8 @@
       window.globalAuth = loadGlobalAuth();
       const initialPath =
         new URLSearchParams(window.location.search).get('path') || window.api.root;
-      fetchFileList(initialPath);
+      // the initial URL already reflects this folder — don't push a duplicate entry
+      fetchFileList(initialPath, undefined, true);
       addBackForwardListener();
       addFileUploadListener();
       addBackToTopListener();

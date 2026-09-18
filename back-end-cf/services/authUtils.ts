@@ -245,12 +245,13 @@ async function getTokenScopes(
     }
   }
 
-  if (tokenScope.includes('children') || tokenScope === 'download') {
+  const scopes = tokenScope.split(',');
+  if (scopes.includes('children') || scopes.includes('download')) {
     const beginPath = reqPath.split('/').slice(0, -1).join('/') || '/';
     candidatePaths.add(beginPath);
   }
 
-  if (tokenScope.includes('recursive')) {
+  if (scopes.includes('recursive')) {
     if (reqPath.startsWith(authPath)) {
       candidatePaths.add(authPath);
     }
@@ -259,7 +260,7 @@ async function getTokenScopes(
   for (const p of candidatePaths) {
     const expectedSign = await hmacSha256(secret, `${p},${tokenArgString}`);
     if (token === expectedSign) {
-      return tokenScope.split(',').sort() as TokenScope[];
+      return scopes.sort() as TokenScope[];
     }
   }
 

@@ -1,0 +1,21 @@
+
+# dependency
+node_modules
+stitch
+
+# wrangler
+.dev.vars
+.vscode
+.wrangler
+dist
+worker.d.ts
+package-lock.json
+
+opencode.json
+.zcode
+AGENTS.md
+graphify-out
+.opencode
+wrangler.jsonc.vars
+wrangler.jsonc.com
+wrangler.jsonc
